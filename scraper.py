@@ -1,11 +1,11 @@
 """
 House Hunter: scrapes Funda, Huurwoningen and Pararius for rental listings
-matching the profiles in config.py, and emails you when new ones appear.
+matching the search in config.py, and emails you when new ones appear.
 
 Usage:
-    python scraper.py          # run all profiles, then repeat every
+    python scraper.py          # search, then repeat every
                                 # POLL_INTERVAL_MINUTES forever
-    python scraper.py --once   # run all profiles a single time and exit
+    python scraper.py --once   # search a single time and exit
 
 See README.md for setup instructions.
 """
@@ -64,14 +64,23 @@ def build_funda_url(areas):
     )
 
 
-def build_huurwoningen_urls(cities):
+def build_huurwoningen_url(city):
     # Huurwoningen has no postcode search - "/in/1011/" silently returns nationwide
-    # results - so search per city and let the zipcode filter narrow it down.
-    return [
+    # results - so search by city and let the zipcode filter narrow it down.
+    return (
         f'https://www.huurwoningen.com/in/{city}/?price={config.PRICE_MIN_EUR - 100}-{config.PRICE_MAX_EUR}'
         f'&living_size={config.FLOOR_AREA_MIN_M2}&since=3'
-        for city in cities
-    ]
+    )
+
+
+def build_pararius_url(city):
+    # Pararius has no postcode search either - same approach as Huurwoningen.
+    if not city:
+        return None
+    return (
+        f'https://www.pararius.com/apartments/{city}/apartment/'
+        f'{config.PRICE_MIN_EUR - 100}-{config.PRICE_MAX_EUR}/{config.FLOOR_AREA_MIN_M2}m2/since-3'
+    )
 
 
 def new_chrome_driver():
@@ -303,8 +312,7 @@ def fetch_all_pages_huurwoningen(driver):
     return listings
 
 # Main function to load cookies and fetch listings across multiple pages
-def fetch_huurwoningen_with_pagination(urls):
-    # One search per city (no postcode search available), all in a single browser session.
+def fetch_huurwoningen_with_pagination(url):
     driver = new_chrome_driver()
 
     # Load a generic URL first to load cookies
@@ -356,13 +364,10 @@ def fetch_huurwoningen_with_pagination(urls):
         driver.quit()
         return []
 
-    # Search each city in turn, reusing the same session
-    listings = []
-    for url in urls:
-        driver.get(url)
-        driver.implicitly_wait(5)
-        print("Page loaded successfully! Title:", driver.title)
-        listings.extend(fetch_all_pages_huurwoningen(driver))
+    driver.get(url)
+    driver.implicitly_wait(5)
+    print("Page loaded successfully! Title:", driver.title)
+    listings = fetch_all_pages_huurwoningen(driver)
 
     # Close the browser
     driver.quit()
@@ -490,19 +495,20 @@ def fetch_pararius_with_pagination(url):
     return listings
 
 
-def job(profile):
+def job():
     start_time = time.time()
-    print(f"=== Searching: {profile['name']} ===")
+    print(f"=== Searching: {config.CITY} ===")
 
-    zipcodes = profile['zipcodes']
+    zipcodes = config.ZIPCODES
     valid_zipcodes = set(zipcodes)
 
-    master_list = fetch_funda_with_pagination(build_funda_url(profile['funda_areas']))
+    master_list = fetch_funda_with_pagination(build_funda_url(config.FUNDA_AREAS))
     master_list += fetch_huurwoningen_with_pagination(
-        build_huurwoningen_urls(profile['huurwoningen_cities'])
+        build_huurwoningen_url(config.HUURWONINGEN_CITY)
     )
-    if profile['pararius_url']:
-        master_list += fetch_pararius_with_pagination(profile['pararius_url'])
+    pararius_url = build_pararius_url(config.PARARIUS_CITY)
+    if pararius_url:
+        master_list += fetch_pararius_with_pagination(pararius_url)
 
     # Process master list
     cleaned_list = []
@@ -541,9 +547,9 @@ def job(profile):
     ))
 
     # Load the previous sorted list from file
-    os.makedirs(os.path.dirname(profile['state_file']) or '.', exist_ok=True)
+    os.makedirs(os.path.dirname(config.STATE_FILE) or '.', exist_ok=True)
     try:
-        with open(profile['state_file'], 'r') as file:
+        with open(config.STATE_FILE, 'r') as file:
             previous_sorted_list = json.load(file)
     except FileNotFoundError:
         previous_sorted_list = []
@@ -555,11 +561,11 @@ def job(profile):
     if new_entries:
         print(f"{len(new_entries)} new listing(s), sending email")
         # Update the stored sorted list
-        with open(profile['state_file'], 'w') as file:
+        with open(config.STATE_FILE, 'w') as file:
             json.dump(sorted_list, file, indent=4)
 
         # Send email notification
-        subject = f"New Rental Listings Available - {profile['name']}"
+        subject = f"New Rental Listings Available - {config.CITY}"
         body = "The following new rental listings have been found:\n\n"
         for entry in new_entries:
             body += f"Address: {entry['Address']}\nPrice: {entry['Price']}\nRooms: {entry['Rooms']}\nSurface Area: {entry['Surface Area']}\nURL: {entry['URL']}\n{'-' * 40}\n"
@@ -587,17 +593,12 @@ def job(profile):
     print(f"Time taken to run the program: {end_time - start_time:.2f} seconds")
 
 
-def run_all_profiles():
-    for profile in config.SEARCH_PROFILES:
-        job(profile)
-
-
 if __name__ == '__main__':
-    run_all_profiles()
+    job()
 
     if '--once' not in sys.argv:
         schedule.every(config.POLL_INTERVAL_MINUTES).minutes.do(
-            lambda: (print("restarting job now"), run_all_profiles())
+            lambda: (print("restarting job now"), job())
         )
         while True:
             schedule.run_pending()

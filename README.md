@@ -5,7 +5,7 @@ and [Pararius](https://www.pararius.com) for rental listings matching the
 areas/price/size you're looking for, and emails you whenever a new one
 shows up. Built for the Dutch rental market.
 
-It keeps a "seen" list per search profile, so you only get emailed about
+It keeps a "seen" list between runs, so you only get emailed about
 listings you haven't already been told about.
 
 ## How it works
@@ -74,11 +74,16 @@ cp config.example.py config.py
 
 Edit `config.py`:
 
-- `SEARCH_PROFILES` — one entry per city/area you want to search. Each
-  profile has its own `funda_areas`/`huurwoningen_cities` (what to query
-  the sites with), `zipcodes` (what to actually keep — also sets the
-  ranking order, first = most preferred), and its own `state_file` so
-  profiles don't interfere with each other.
+- `CITY` — display name, only used in the email subject.
+- `FUNDA_AREAS` — postcodes and/or city names for Funda to search. Dutch
+  postcodes are 4 digits (a "PC4"), which lets you target specific
+  neighbourhoods instead of a whole city.
+- `HUURWONINGEN_CITY` / `PARARIUS_CITY` — the city slug as it appears in
+  each site's URL (set `PARARIUS_CITY = None` to skip Pararius).
+- `ZIPCODES` — which postcodes to actually keep results from; also sets
+  the ranking order (first = most preferred). Usually the same as
+  `FUNDA_AREAS`.
+- `STATE_FILE` — where "already seen" listings are stored between runs.
 - `PRICE_MIN_EUR` / `PRICE_MAX_EUR`, `FLOOR_AREA_MIN_M2` /
   `FLOOR_AREA_MAX_M2`, `ROOMS_MIN` / `ROOMS_MAX`, `BEDROOMS_MIN` /
   `BEDROOMS_MAX` — passed straight into the site search queries.
